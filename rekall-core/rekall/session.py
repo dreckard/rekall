@@ -41,10 +41,10 @@ from rekall import io_manager
 from rekall import kb
 from rekall import obj
 from rekall import plugin
-from rekall import registry
-from rekall import utils
 
 from rekall.ui import renderer
+from rekall_lib import registry
+from rekall_lib import utils
 
 
 config.DeclareOption(
@@ -650,13 +650,16 @@ class Session(object):
                 pass
 
         if not self._repository_managers:
-            self.logging.warn(
-                "No usable repositories were found. "
-                "Rekall Will attempt to use the local cache. This is likely "
-                "to fail if profiles are missing locally!")
-            self._repository_managers = [
-                (None, io_manager.DirectoryIOManager(
-                    urn=cache.GetCacheDir(self), session=self))]
+            try:
+                self.logging.warn(
+                    "No usable repositories were found. "
+                    "Rekall Will attempt to use the local cache. "
+                    "This is likely to fail if profiles are missing locally!")
+                self._repository_managers = [
+                    (None, io_manager.DirectoryIOManager(
+                        urn=cache.GetCacheDir(self), session=self))]
+            except IOError:
+                self._repository_managers = []
 
         return self._repository_managers
 

@@ -53,9 +53,9 @@ from pyaff4 import plugins  # pylint: disable=unused-import
 from rekall import constants
 from rekall import plugin
 from rekall import testlib
-from rekall import utils
 from rekall import yaml_utils
 from rekall.plugins import core
+from rekall_lib import utils
 
 
 class AFF4ProgressReporter(aff4.ProgressContext):
@@ -668,7 +668,8 @@ class AFF4Acquire(AbstractAFF4Plugin):
                 # User can request to just acquire regular files but only if
                 # no physical_address_space is also specified.
                 elif self.plugin_args.files:
-                    for x in self.copy_files(resolver, volume, self.files):
+                    for x in self.copy_files(resolver, volume,
+                                             self.plugin_args.files):
                         yield x
 
 

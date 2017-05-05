@@ -37,11 +37,13 @@ from artifacts import definitions
 from artifacts import errors
 
 from rekall import plugin
-from rekall import registry
 from rekall import obj
+from rekall import yaml_utils
 from rekall.ui import text
 from rekall.ui import json_renderer
 from rekall.plugins.response import common
+
+from rekall_lib import registry
 
 
 class ArtifactResult(object):
@@ -172,9 +174,7 @@ class DirectoryBasedWriter(BaseArtifactResultWriter):
             try:
                 self.write_file(result)
             except (IOError, OSError) as e:
-                self.session.logging.warn(
-                    "Unable to copy file %s into output: %s",
-                    result["filename"], e)
+                self.session.logging.warn("Unable to copy file: %s", e)
 
         with self.session.GetRenderer().open(
                 directory=self.dump_dir,
@@ -960,6 +960,28 @@ class ArtifactsCollector(plugin.TypedProfileCommand,
                     writer.write_result(hit["result"])
                 yield hit
 
+class ArtifactsView(plugin.TypedProfileCommand,
+                    plugin.Command):
+    name = "artifact_view"
+
+    __args = [
+        dict(name="artifacts", type="ArrayStringParser", positional=True,
+             help="A list of artifacts to display")
+    ]
+
+    table_header = [
+        dict(name="divider", type="Divider"),
+        dict(name="Message")
+    ]
+
+    def collect(self):
+        artifact_profile = self.session.LoadProfile("artifacts")
+        for artifact in self.plugin_args.artifacts:
+            definition = artifact_profile.definitions_by_name.get(artifact)
+            if definition:
+                yield dict(divider=artifact)
+                yield dict(Message=yaml_utils.safe_dump(definition))
+
 
 class ArtifactsList(plugin.TypedProfileCommand,
                     plugin.Command):
@@ -1005,7 +1027,8 @@ class ArtifactsList(plugin.TypedProfileCommand,
             # Determine the type:
             types = set()
             for source in definition.sources:
-                if self.plugin_args.all or source.is_active(session=self.session):
+                if self.plugin_args.all or source.is_active(
+                        session=self.session):
                     types.add(source.type_indicator)
 
                     if self.plugin_args.regex.match(definition.name):

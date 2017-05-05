@@ -79,10 +79,10 @@ from rekall_agent import common
 from rekall_agent import location
 from rekall_agent import result_collections
 from rekall_agent import output_plugin
-from rekall_agent import serializer
 from rekall_agent.config import agent
 from rekall_agent.messages import batch
 from rekall_agent.messages import resources
+from rekall_lib import serializer
 
 
 class FlowStatus(batch.BatchTicket):
@@ -154,7 +154,7 @@ class FlowStatus(batch.BatchTicket):
         flows = {}
         for flow_data in common.THREADPOOL.map(
                 lambda f: config.server.flows_for_server(f).read_file(),
-                flow_ids):
+                set(flow_ids)):
             flow_obj = Flow.from_json(flow_data, session=session)
             flows[flow_obj.flow_id] = flow_obj
 
@@ -204,7 +204,7 @@ class HuntStatus(FlowStatus):
     @staticmethod
     def _process_flows(_args):
         tickets, flow_id, session, flows = _args
-        config = session.GetParameter("agent_config")
+        config = session.GetParameter("agent_config_obj")
 
         def _update_flow_info(flow_collection, tickets):
             """Update the collection atomically."""

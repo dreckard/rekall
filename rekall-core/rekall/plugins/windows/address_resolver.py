@@ -26,10 +26,10 @@ from rekall import config
 from rekall import obj
 from rekall import plugin
 from rekall import testlib
-from rekall import utils
 from rekall.plugins.common import address_resolver
 from rekall.plugins.windows import common
 from rekall.plugins.overlays.windows import pe_vtypes
+from rekall_lib import utils
 
 
 config.DeclareOption(
@@ -142,6 +142,11 @@ class PEModule(address_resolver.Module):
 
     def build_profile_from_exports(self):
         """Create a dummy profile from PE exports."""
+        # Building from export table is slow and might not be needed if the user
+        # wants speed.
+        if self.session.GetParameter("performance") == "fast":
+            return obj.NoneObject()
+
         self.session.logging.debug("Building profile from PE Exports for %s",
                                    self.name)
         result = obj.Profile.classes["BasicPEProfile"](

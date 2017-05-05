@@ -95,14 +95,15 @@ import StringIO
 from rekall import io_manager
 from rekall import obj
 from rekall import plugin
-from rekall import registry
 from rekall import testlib
-from rekall import utils
 
 from rekall.plugins.common import profile_index
 from rekall.plugins.overlays.linux import dwarfdump
 from rekall.plugins.overlays.linux import dwarfparser
 from rekall.plugins.windows import common
+
+from rekall_lib import registry
+from rekall_lib import utils
 
 
 class ProfileConverter(object):
@@ -165,8 +166,8 @@ class LinuxConverter(ProfileConverter):
         sys_map = {}
         # get the system map
         for line in system_map.splitlines():
-            (address, _, symbol) = line.strip().split()
             try:
+                (address, _, symbol) = line.strip().split()
                 sys_map[symbol] = long(address, 16) & 0xFFFFFFFFFFFF
             except ValueError:
                 pass

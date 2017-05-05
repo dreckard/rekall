@@ -28,9 +28,10 @@ import StringIO
 
 from rekall import config
 from rekall import obj
-from rekall import registry
-from rekall import utils
 from rekall.ui import text as text_renderer
+
+from rekall_lib import registry
+from rekall_lib import utils
 
 
 class Error(Exception):
@@ -56,7 +57,7 @@ class CommandOption(object):
                  help="", positional=False, required=False, override=False,
                  hidden=False):
         self.name = name
-        self.default = default
+        self._default = default
         self.type = type
         self.help = help
         self._choices = choices
@@ -64,6 +65,13 @@ class CommandOption(object):
         self.positional = positional
         self.override = override
         self.hidden = hidden
+
+    @utils.safe_property
+    def default(self):
+        if callable(self._default):
+            return self._default()
+
+        return self._default
 
     @utils.safe_property
     def choices(self):

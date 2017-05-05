@@ -41,16 +41,19 @@ def find_data_files(source):
     return result
 
 install_requires = [
-    "rekall-core >= 1.5.0, < 1.6",
+    "rekall-lib",
+    "rekall-core >= 1.6.0, < 1.7",
     "requests==2.11.1",
     "httplib2==0.9.2",
     "oauth2client==3.0.0",
     "cryptography==1.4",
     "filelock==2.0.6",
-    "pathlib==1.0.1"
+    "pathlib==1.0.1",
+    "portpicker==1.1.1"
 ]
 
-data_files = find_data_files("test_data")
+data_files = (find_data_files("test_data") +
+              find_data_files("messages"))
 
 
 class CleanCommand(Command):
@@ -66,7 +69,6 @@ class CleanCommand(Command):
             raise RuntimeError('Must be in package root: %s' % self.cwd)
 
         os.system('rm -rf ./build ./dist')
-
 
 commands = {}
 commands["clean"] = CleanCommand
@@ -96,4 +98,5 @@ setup(
     """,
     zip_safe=False,
     install_requires=install_requires,
+    test_suite="nose2.collector.collector",
 )

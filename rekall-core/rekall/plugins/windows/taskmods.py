@@ -24,7 +24,7 @@
 # pylint: disable=protected-access
 
 from rekall import testlib
-from rekall import utils
+from rekall_lib import utils
 
 from rekall.plugins.common import memmap
 from rekall.plugins.windows import common
@@ -152,7 +152,8 @@ class Threads(common.WinProcessFilter):
                                win32_start=thread.Win32StartAddress,
                                win32_start_symb=utils.FormattedAddress(
                                    self.session.address_resolver,
-                                   thread.Win32StartAddress))
+                                   thread.Win32StartAddress,
+                                   ))
 
 
 class WinMemDump(memmap.MemDumpMixin, common.WinProcessFilter):

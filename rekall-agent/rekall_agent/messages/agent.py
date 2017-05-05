@@ -8,12 +8,11 @@ import yaml
 from wheel import pep425tags
 
 from rekall import resources
-from rekall_agent import serializer
-
+from rekall_lib import serializer
 
 # Get field definitions from messages.yaml.
 path = resources.get_resource("messages.yaml", "rekall-agent",
-                              prefix="rekall_agent")
+                              prefix="messages")
 
 DEFINITIONS = yaml.safe_load(open(path, "rb").read())
 

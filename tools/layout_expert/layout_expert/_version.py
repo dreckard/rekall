@@ -12,9 +12,9 @@ def get_versions():
 def raw_versions():
     return json.loads("""
 {
-    "codename": "Furka", 
-    "version": "1.5.3", 
-    "post": "1", 
+    "codename": "Gotthard", 
+    "version": "1.6.2", 
+    "post": "0", 
     "rc": "0"
 }
 """)
@@ -94,7 +94,10 @@ def tag_version_data(version_data, version_path="version.yaml"):
         pep440 += ".rc" + version_data["rc"]
 
     if version_data.get("dev", 0):
-        pep440 += ".dev" + str(version_data["dev"])
+        # A Development release comes _before_ the main release.
+        last = version_data["version"].rsplit(".", 1)
+        version_data["version"] = "%s.%s" % (last[0], int(last[1]) + 1)
+        pep440 = version_data["version"] + ".dev" + str(version_data["dev"])
 
     version_data["pep440"] = pep440
 

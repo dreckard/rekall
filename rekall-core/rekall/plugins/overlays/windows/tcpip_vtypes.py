@@ -20,9 +20,9 @@ import socket
 
 from rekall import kb
 from rekall import obj
-from rekall import utils
 from rekall.plugins.overlays import basic
 from rekall.plugins.overlays.windows import pe_vtypes
+from rekall_lib import utils
 
 
 AF_INET = 2
@@ -571,6 +571,70 @@ win7_x86_dynamic_overlays = {
     ),
 }
 
+# Structures for netscan on x32 Win10
+tcpip_vtypes_win10_32 = {
+    '_ADDRINFO' : [None, {
+        'Local' : [0x0, ['pointer', ['_LOCAL_ADDRESS']]],
+        'Remote' : [0xC, ['pointer', ['_IN_ADDR']]],
+    }],
+    '_TCP_ENDPOINT': [None, { # TcpE
+        'InetAF' : [0x8, ['pointer', ['_INETAF']]],
+        'AddrInfo' : [0xC, ['pointer', ['_ADDRINFO']]],
+        'State' : [0x38, ['Enumeration', dict(
+            target='long',
+            choices=TCP_STATE_ENUM)]],
+        'LocalPort' : [0x3C, ['unsigned be short']],
+        'RemotePort' : [0x3E, ['unsigned be short']],
+        'Owner' : [0x1B0, ['pointer', ['_EPROCESS']]],
+    }],
+}
+
+# Structures for netscan on x64 Win10
+tcpip_vtypes_win10_64 = {
+    '_IN_ADDR' : [None, {
+        'addr4' : [0x0, ['Ipv4Address']],
+        'addr6' : [0x0, ['Ipv6Address']],
+    }],
+    '_TCP_LISTENER': [0x74, { # TcpL
+        'Owner' : [0x30, ['pointer', ['_EPROCESS']]],
+        'CreateTime' : [0x40, ['WinFileTime', {}]],
+        'LocalAddr' : [0x60, ['pointer', ['_LOCAL_ADDRESS']]],
+        'InetAF' : [0x28, ['pointer', ['_INETAF']]],
+        'Port' : [0x72, ['unsigned be short']],
+    }],
+    '_INETAF' : [None, {
+        'AddressFamily' : [0x18, ['unsigned short']],
+    }],
+    '_LOCAL_ADDRESS_WIN10_UDP' : [None, {
+        'pData' : [0x0, ['pointer', ['_IN_ADDR']]],
+    }],
+    '_LOCAL_ADDRESS' : [None, {
+        'pData' : [0x10, ['pointer', ['pointer', ['_IN_ADDR']]]],
+    }],
+    '_ADDRINFO' : [None, {
+        'Local' : [0x0, ['pointer', ['_LOCAL_ADDRESS']]],
+        'Remote' : [0x10, ['pointer', ['_IN_ADDR']]],
+    }],
+    '_TCP_ENDPOINT': [0x270, { # TcpE
+        'InetAF' : [0x10, ['pointer', ['_INETAF']]],
+        'AddrInfo' : [0x18, ['pointer', ['_ADDRINFO']]],
+        'State' : [0x6c, ['Enumeration', dict(
+            target='long',
+            choices=TCP_STATE_ENUM)]],
+        'LocalPort' : [0x70, ['unsigned be short']],
+        'RemotePort' : [0x72, ['unsigned be short']],
+        'Owner' : [0x258, ['pointer', ['_EPROCESS']]],
+        'CreateTime' : [0x268, ['WinFileTime', {}]],
+    }],
+    '_UDP_ENDPOINT': [0x80, { # UdpA
+        'Owner' : [0x28, ['pointer', ['_EPROCESS']]],
+        'CreateTime' : [0x58, ['WinFileTime', {}]],
+        'LocalAddr' : [0x80, ['pointer', ['_LOCAL_ADDRESS_WIN10_UDP']]],
+        'InetAF' : [0x20, ['pointer', ['_INETAF']]],
+        'Port' : [0x78, ['unsigned be short']],
+    }],
+}
+
 
 
 class _TCP_LISTENER(obj.Struct):
@@ -629,6 +693,34 @@ class _TCP_ENDPOINT(_TCP_LISTENER):
 class _UDP_ENDPOINT(_TCP_LISTENER):
     """Class for objects found in UdpA pools"""
 
+class _UDP_ENDPOINT_WIN10x64(_UDP_ENDPOINT):
+    """Class for objects found in UdpA pools"""
+
+    def dual_stack_sockets(self, vm=None):
+        """Handle Windows dual-stack sockets"""
+
+        # If this pointer is valid, the socket is bound to
+        # a specific IP address. Otherwise, the socket is
+        # listening on all IP addresses of the address family.
+        local_addr = self.LocalAddr.dereference(vm=vm)
+
+        # Switch to the correct address space.
+        af_inet = self.InetAF.dereference(vm=vm)
+
+        # Note the remote address is always INADDR_ANY or
+        # INADDR6_ANY for sockets. The moment a client
+        # connects to the listener, a TCP_ENDPOINT is created
+        # and that structure contains the remote address.
+        if local_addr:
+            inaddr = local_addr.pData.dereference()
+            if af_inet.AddressFamily == AF_INET:
+                yield "v4", inaddr.addr4, inaddr_any
+            else:
+                yield "v6", inaddr.addr6, inaddr6_any
+        else:
+            yield "v4", inaddr_any, inaddr_any
+            if af_inet.AddressFamily.v() == AF_INET6:
+                yield "v6", inaddr6_any, inaddr6_any
 
 class TcpipPluginMixin(object):
     """A mixin for plugins that want to use tcpip.sys profiles."""
@@ -657,20 +749,25 @@ class Tcpip(pe_vtypes.BasicPEProfile):
     @classmethod
     def Initialize(cls, profile):
         super(Tcpip, cls).Initialize(profile)
+        version = profile.session.profile.metadata("version")
 
-        # Network Object Classess for Vista, 2008, and 7 x86 and x64
-        if profile.get_constant("TCP_LISTENER_ACTIVATED"):
-            profile.add_classes(dict(_TCP_LISTENER=_TCP_LISTENER,
-                                     _TCP_ENDPOINT=_TCP_ENDPOINT,
-                                     _UDP_ENDPOINT=_UDP_ENDPOINT))
+        # Network Object Classess for Vista, 2008, 7, and 10 x86 and x64
+        profile.add_classes(dict(_TCP_LISTENER=_TCP_LISTENER,
+                                 _TCP_ENDPOINT=_TCP_ENDPOINT))
+        if version >= 10.0:
+            profile.add_classes(dict(_UDP_ENDPOINT=_UDP_ENDPOINT_WIN10x64))
+        else:
+            profile.add_classes(dict(_UDP_ENDPOINT=_UDP_ENDPOINT))
 
         # Switch on the kernel version. FIXME: This should be done using the
         # generate_types module.
-        version = profile.session.profile.metadata("version")
-
         if profile.metadata("arch") == "AMD64":
+            # Windows 10
+            if version >= 10.0:
+                profile.add_overlay(tcpip_vtypes_win10_64)
+
             # Vista SP1.
-            if version == 6.0:
+            elif version == 6.0:
                 profile.add_overlay(tcpip_vtypes_vista_64)
                 profile.add_overlay({
                     '_TCP_ENDPOINT': [None, {
@@ -702,6 +799,11 @@ class Tcpip(pe_vtypes.BasicPEProfile):
             elif version >= 6.1:
                 profile.add_overlay(tcpip_vtypes_vista)
                 profile.add_overlay(tcpip_vtypes_7)
+
+            # Windows 10
+            elif version >= 10.0:
+                profile.add_overlay(tcpip_vtypes_vista)
+                profile.add_overlay(tcpip_vtypes_win10_32)
 
         # Pool tags
         profile.add_constants(dict(UDP_END_POINT_POOLTAG="UdpA",

@@ -28,10 +28,11 @@ from rekall import addrspace
 from rekall import scan
 from rekall import kb
 from rekall import plugin
-from rekall import utils
 
 from rekall.plugins import core
 from rekall.plugins.common import scanners
+from rekall_lib import utils
+
 
 # Windows kernel pdb filenames.
 KERNEL_NAMES = set(
@@ -246,6 +247,11 @@ class PoolTagCheck(scan.StringCheck):
         # kernel profile for pool definitions.).
         self.tag_offset = self.session.profile.get_obj_offset(
             "_POOL_HEADER", "PoolTag")
+
+        if self.tag_offset == None:
+            raise RuntimeError(
+                "Unable to get PoolTag offset in _POOL_HEADER. "
+                "Is the profile correct?")
 
     def skip(self, buffer_as, offset):
         return super(PoolTagCheck, self).skip(

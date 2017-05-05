@@ -31,8 +31,8 @@ import re
 import os
 
 from rekall import plugin
-from rekall import utils
 from rekall.plugins.response import common
+from rekall_lib import utils
 
 
 BUFFER_SIZE = 10 * 1024 * 1024
@@ -135,26 +135,20 @@ class IRHash(common.AbstractIRCommandPlugin):
 
 
 class Component(object):
-    def __init__(self, session, component, cache):
+    def __init__(self, session, component=None, cache=None):
         self.session = session
         self.component = component
         self.component_cache = cache
 
-    def _build_cache(self, path):
-        """Builds a case corrected cache of filenames.
+    def stat(self, path):
+        key = unicode(path)
+        try:
+            return self.component_cache[key]
+        except KeyError:
+            stat = common.FileFactory(path)
+            self.component_cache.Put(key, stat)
 
-        keys are lower cased filenames within the directory file_info. Values
-        are lists of files with those lower cased filenames with the correct
-        casing.
-
-        """
-        cache = {}
-        # Cache not populated
-        for basename in self.listdir(path):
-            cache.setdefault(basename.lower(), []).append(basename)
-
-        #self.component_cache.Put(file_info.filename.name, cache)
-        return cache
+            return stat
 
     def __eq__(self, other):
         return unicode(self) == unicode(other)
@@ -164,12 +158,6 @@ class Component(object):
 
     def __str__(self):
         return "%s:%s" % (self.__class__.__name__, self.component)
-
-    def listdir(self, path):
-        try:
-            return os.listdir(path)
-        except (IOError, OSError):
-            return []
 
 
 class LiteralComponent(Component):
@@ -184,56 +172,75 @@ class LiteralComponent(Component):
         # For case insensitive filesystems we can just try to open the
         # component.
         if self.case_insensitive_filesystem():
-            result = os.path.join(path, self.component)
-            if os.path.access(result, os.R_OK):
-                return [result]
+            result_pathspec = path.add(self.component)
+            stat = self.stat(result_pathspec)
+            if stat:
+                return [stat.filename]
+            else:
+                return []
 
+        # Since we must match a case insensitve filename we need to
+        # list all the files and find the best match.
+        stat = common.FileFactory(path)
+        if not stat:
             return []
 
-        key = self.component.lower()
-        try:
-            cache = self.component_cache.Get(path)
-        except KeyError:
-            cache = self._build_cache(path)
+        children = {}
+        for x in stat.list_names():
+            children.setdefault(x.lower(), []).append(x)
 
-        return [os.path.join(path, x) for x in cache.get(key, [])]
+        return [stat.filename.add(x)
+                for x in children.get(self.component.lower(), [])]
 
 
 class RegexComponent(Component):
-    def __init__(self, *args):
-        super(RegexComponent, self).__init__(*args)
+    def __init__(self, *args, **kwargs):
+        super(RegexComponent, self).__init__(*args, **kwargs)
         self.component_re = re.compile(self.component, re.I)
 
     def filter(self, path):
-        if os.path.isdir(path) and not os.path.islink(path):
-            for basename in self.listdir(path):
+        stat = self.stat(path)
+        if not stat:
+            return
+
+        if stat.st_mode.is_dir() and not stat.st_mode.is_link():
+            self.session.report_progress("Searching %s", path)
+            for basename in stat.list_names():
                 if self.component_re.match(basename):
-                    yield os.path.join(path, basename)
+                    yield stat.filename.add(basename)
 
 
 class RecursiveComponent(RegexComponent):
-    def __init__(self, session, component, cache, depth):
-        super(RecursiveComponent, self).__init__(session, component, cache)
+    def __init__(self, depth=3, **kwargs):
+        super(RecursiveComponent, self).__init__(**kwargs)
         self.depth = depth
 
     def filter(self, path, depth=0):
-        if depth == self.depth:
+        self.session.report_progress("Recursing into %s", path)
+
+        # TODO: Deal with cross devices.
+        if depth >= self.depth:
             return
 
-        if not os.path.isdir(path):
+        stat = self.stat(path)
+        if not stat:
             return
 
-        if os.path.islink(path):
-            return
+        # Do not follow symlinks.
+        if stat.st_mode.is_dir() and not stat.st_mode.is_link():
+            # The top level counts as a hit, so that e.g. /**/*.txt
+            # matches /foo.txt as well.
+            if depth == 0:
+                yield stat.filename
 
-        for basename in self.listdir(path):
-            subdir = os.path.join(path, basename)
-            yield subdir
+            for basename in stat.list_names():
+                if (self.component_re.match(basename) and
+                    not stat.st_mode.is_link()):
+                    subdir = stat.filename.add(basename)
+                    yield subdir
 
-            if (self.component_re.match(basename) and os.path.isdir(subdir) and
-                not os.path.islink(subdir)):
-                for subitem in self.filter(subdir, depth+1):
-                    yield subitem
+                    for subitem in self.filter(subdir, depth+1):
+                        yield subitem
 
 
 class IRGlob(common.AbstractIRCommandPlugin):
@@ -252,10 +259,8 @@ class IRGlob(common.AbstractIRCommandPlugin):
         dict(name="case_insensitive", default=True, type="Bool",
              help="Globs will be case insensitive."),
         dict(name="path_sep",
-             # Default path seperator is platform dependent.
-             default="\\" if platform.system() == "Windows" else "/",
              help="Path separator character (/ or \\)"),
-        dict(name="filesystem", choices=common.FILE_SPEC_DISPATCHER,
+        dict(name="filesystem", choices=list(common.FILE_SPEC_DISPATCHER),
              type="Choices", default="API",
              help="The virtual filesystem implementation to glob in.")
     ]
@@ -278,6 +283,12 @@ class IRGlob(common.AbstractIRCommandPlugin):
 
     def __init__(self, *args, **kwargs):
         super(IRGlob, self).__init__(*args, **kwargs)
+        self.component_cache = utils.FastStore(50)
+
+        # Default path seperator is platform dependent.
+        if not self.plugin_args.path_sep:
+            self.plugin_args.path_sep = (
+                "\\" if platform.system() == "Windows" else "/")
 
         # By default use the root of the filesystem.
         if self.plugin_args.root is None:
@@ -352,8 +363,11 @@ class IRGlob(common.AbstractIRCommandPlugin):
           ValueError: If the glob is invalid.
 
         """
+        pattern_components = common.FileSpec(
+            pattern, path_sep=self.plugin_args.path_sep).components()
+
         components = []
-        for path_component in pattern.split(self.plugin_args.path_sep):
+        for path_component in pattern_components:
             if not path_component:
                 continue
 
@@ -368,30 +382,30 @@ class IRGlob(common.AbstractIRCommandPlugin):
                     depth = int(m.group(1))
 
                 path_component = path_component.replace(m.group(0), "*")
-
                 component = RecursiveComponent(
-                    self.session,
-                    fnmatch.translate(path_component),
-                    self.component_cache,
+                    session=self.session,
+                    component=fnmatch.translate(path_component),
+                    cache=self.component_cache,
                     depth=depth)
 
             elif self.GLOB_MAGIC_CHECK.search(path_component):
                 component = RegexComponent(
-                    self.session,
-                    fnmatch.translate(path_component),
-                    self.component_cache)
+                    session=self.session,
+                    cache=self.component_cache,
+                    component=fnmatch.translate(path_component))
 
             else:
                 component = LiteralComponent(
-                    self.session, path_component,
-                    self.component_cache)
+                    session=self.session,
+                    cache=self.component_cache,
+                    component=path_component)
 
             components.append(component)
 
         return components
 
     def _filter(self, node, path):
-        self.session.report_progress("Checking %s", path)
+        """Path is the pathspec of the path we begin evaluation with."""
         for component, child_node in node.iteritems():
             # Terminal node - yield the result.
             if not child_node:
@@ -404,7 +418,7 @@ class IRGlob(common.AbstractIRCommandPlugin):
                     for subpath in self._filter(child_node, matching_path):
                         yield subpath
 
-    def collect_globs(self, globs):
+    def make_component_tree(self, globs):
         expanded_globs = []
         for glob in globs:
             expanded_globs.extend(self._interpolate_grouping(glob))
@@ -415,11 +429,16 @@ class IRGlob(common.AbstractIRCommandPlugin):
             for component in self.convert_glob_into_path_components(glob):
                 node = node.setdefault(component, {})
 
-        for path in self._filter(component_tree, self.plugin_args.root):
+        return component_tree
+
+    def collect_globs(self, globs):
+        component_tree = self.make_component_tree(globs)
+        root = common.FileSpec(self.plugin_args.root,
+                               path_sep=self.plugin_args.path_sep)
+        for path in self._filter(component_tree, root):
             yield common.FileFactory(path, session=self.session)
 
     def collect(self):
-        self.component_cache = utils.FastStore(50)
         for x in self.collect_globs(self.plugin_args.globs):
             yield dict(path=x)
 

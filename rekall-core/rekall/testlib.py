@@ -62,8 +62,8 @@ import unittest
 
 from rekall import config
 from rekall import plugin
-from rekall import registry
 from rekall import session as rekall_session
+from rekall_lib import registry
 
 
 class Tail(threading.Thread):
@@ -152,6 +152,9 @@ class RekallBaseUnitTestCase(unittest.TestCase):
         super(RekallBaseUnitTestCase, cls).tearDownClass()
         if cls.temp_directory:
             shutil.rmtree(cls.temp_directory, True)
+
+    def setUp(self):
+        self.session = self.MakeUserSession()
 
     def LaunchExecutable(self, config_options):
         """Launches the rekall executable with the config specified.
@@ -419,6 +422,28 @@ class HashChecker(SimpleTestCase):
 
     def testCase(self):
         self.assertEqual(self.baseline['hashes'], self.current['hashes'])
+
+class disable_if(object):
+    """Disable a test if the condition is true."""
+    def __init__(self, conditional):
+        self.conditional = conditional
+        self.original_run = None
+
+    def __call__(self, cls):
+        self.original_run = cls.run
+
+        def run(instance, *args, **kwargs):
+            condition = self.conditional
+            if callable(condition):
+                condition = condition()
+
+            # If the condition is true we skip the run method.
+            if condition:
+                return self.original_run(instance, *args, **kwargs)
+
+        # Wrap the run method with a skipper.
+        cls.run = run
+        return cls
 
 
 main = unittest.main

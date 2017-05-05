@@ -34,7 +34,7 @@ __author__ = (
 
 import hashlib
 from rekall import obj
-from rekall import utils
+from rekall_lib import utils
 
 
 class IndexProfileLoader(obj.ProfileSectionLoader):
@@ -187,6 +187,7 @@ class SymbolOffsetIndex(Index):
             relative_symbols = self.RelativizeSymbols(symbols.copy())
         except ValueError as e:
             self.session.logging.debug(str(e))
+            return []
 
         for profile, traits in self.traits.iteritems():
             matched_traits = 0
